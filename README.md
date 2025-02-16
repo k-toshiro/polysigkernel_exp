@@ -15,8 +15,6 @@ Requires Python 3.12+, JAX 0.4.23+.
 
 ## Quick example
 
-Lineax can solve a least squares problem with an explicit matrix operator:
-
 ```python
 import jax
 from polysigkernel import SigKernel

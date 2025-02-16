@@ -7,7 +7,7 @@ This package is inspired by the [sigkerax](https://github.com/crispitagorico/sig
 ## Installation
 
 ```bash
-pip install polysigkernel
+pip install git+https://github.com/FrancescoPiatti/polysigkernel.git
 ```
 
 Requires Python 3.12+, JAX 0.4.23+.

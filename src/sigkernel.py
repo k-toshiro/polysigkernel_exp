@@ -65,22 +65,42 @@ class SigKernel:
                       Y: jnp.ndarray, 
                       max_batch : int = None,
                       sym : bool = False) -> jnp.ndarray:
+        """
+        Compute the signature kernel matrix between sets of paths X and Y.
+
+        If max_batch is specified and the batch dimension exceeds that limit,
+        the computation is split recursively to avoid memory issues.
+
+        Args:
+            X (jax.numpy.ndarray): Shape (batch_X, length_X, dim).
+            Y (jax.numpy.ndarray): Shape (batch_Y, length_Y, dim).
+            max_batch (int, optional): Maximum allowed batch size for a single 
+                                       kernel computation. Defaults to None 
+                                       (i.e., no splitting).
+            sym (bool, optional): If True, the result is treated as symmetric, and 
+                                  sub-blocks are computed accordingly. Defaults to False.
+
+        Returns:
+            jax.numpy.ndarray: Kernel matrix of shape (batch_X, batch_Y).
+        """
         
-        # interpolate on new grid
+        # Refine X and Y via interpolation
         X = interpolate_fn(X, t_min=self.s0, t_max=self.S, refinement_factor=self.refinement_factor, kind=self.interpolation)
         Y = interpolate_fn(Y, t_min=self.t0, t_max=self.T, refinement_factor=self.refinement_factor, kind=self.interpolation)
 
-        # add time channel (optionally)
+        # Optionally add time as an extra channel
         if self.add_time:
             X = add_time_fn(X, t_min=self.s0, t_max=self.S)
             Y = add_time_fn(Y, t_min=self.t0, t_max=self.T)
 
         batch_X, batch_Y = X.shape[0], Y.shape[0]
         
+        # If no splitting is necessary (or no max_batch is provided):
         if (max_batch is None) or (batch_X <= max_batch and batch_Y <= max_batch):
             return self.solver(static_ker=self.static_kernel, scale=self.scale, 
                                order=self.order).solve(X, Y, sym, self.multi_gpu)
         
+        # Case 1: X small enough, Y large
         elif batch_X <= max_batch and batch_Y > max_batch:
             cutoff = int(batch_Y/2)
             Y1, Y2 = Y[:cutoff], Y[cutoff:]
@@ -88,7 +108,7 @@ class SigKernel:
             K2 = self.kernel_matrix(X, Y2, max_batch, False)
             return jnp.concatenate((K1, K2), axis=1)
         
-        
+        # Case 2: X large, Y small enough
         elif batch_X > max_batch and batch_Y <= max_batch:
             cutoff = int(batch_X/2)
             X1, X2 = X[:cutoff], X[cutoff:]
@@ -96,17 +116,22 @@ class SigKernel:
             K2 = self.kernel_matrix(X2, Y, max_batch, False)
             return jnp.concatenate((K1, K2), axis=0)
         
+        # Case 3: Both X, Y large
         else:
             cutoff_X, cutoff_Y = int(batch_X/2), int(batch_Y/2)
             X1, X2 = X[:cutoff_X], X[cutoff_X:]
             Y1, Y2 = Y[:cutoff_Y], Y[cutoff_Y:]
+
+            # Compute sub-blocks
             K11 = self.kernel_matrix(X1, Y1, max_batch, sym)
             K12 = self.kernel_matrix(X1, Y2, max_batch, False)
             K22 = self.kernel_matrix(X2, Y2, max_batch, sym)
+
             if sym:
                 K21 = K12.swapaxes(0, 1)
             else:
                 K21 = self.kernel_matrix(X2, Y1, max_batch, False)
+
             K_top = jnp.concatenate((K11, K12), axis=1)
             K_bottom = jnp.concatenate((K21, K22), axis=1)
             K = jnp.concatenate((K_top, K_bottom), axis=0)
